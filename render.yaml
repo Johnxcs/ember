@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ember-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # you paste your Supabase connection string in the Render dashboard

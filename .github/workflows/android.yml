@@ -1,0 +1,79 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK + platform
+        run: |
+          sdkmanager "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Generate app icons
+        working-directory: app
+        run: |
+          convert -size 1024x1024 xc:'#ff6b35' icon.png
+          tauri icon icon.png
+
+      - name: Init Android project
+        working-directory: app
+        run: tauri android init
+
+      - name: Allow ws:// (cleartext) connections
+        run: |
+          M=app/src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          grep -q usesCleartextTraffic "$M" || sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$M"
+
+      - name: Build APK (debug-signed, installable)
+        working-directory: app
+        run: tauri android build --apk --debug --target aarch64
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          find app/src-tauri/gen/android -name "*.apk" -exec cp {} dist/ember.apk \;
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ember-apk
+          path: dist/ember.apk
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ember.apk

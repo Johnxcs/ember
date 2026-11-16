@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ember</title>
+<style>
+:root{--bg:#1a1b1e;--bg2:#222327;--bg3:#2b2d31;--fg:#eceef1;--mut:#9aa0a8;--acc:#ff6b35;--acc2:#ffb347;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif}
+button,input,select{font:inherit;color:inherit}
+[hidden]{display:none!important}
+#login{display:grid;place-content:center;gap:10px;height:100%;padding:24px;max-width:380px;margin:auto}
+#login h1{margin:0;color:var(--acc);font-size:34px}
+input,select{background:var(--bg3);border:1px solid #3a3c42;border-radius:8px;padding:10px}
+.btn{background:var(--acc);border:0;border-radius:8px;padding:10px 14px;color:#fff;font-weight:600}
+#err{color:#ff7b7b;min-height:1.2em}
+#app{display:grid;grid-template-columns:200px 1fr 170px;height:100%;padding-bottom:env(safe-area-inset-bottom)}
+aside{background:var(--bg2);overflow:auto;padding:calc(10px + env(safe-area-inset-top)) 8px 10px}
+aside h4{margin:12px 6px 4px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.ch{display:flex;justify-content:space-between;padding:7px 10px;border-radius:6px;cursor:pointer;color:var(--mut)}
+.ch.on{background:var(--bg3);color:var(--fg)}
+.ch small{color:var(--acc2)}
+.u{padding:4px 8px;color:var(--mut);font-size:14px}
+main{display:flex;flex-direction:column;min-width:0;height:100%}
+header{display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 12px 8px;border-bottom:1px solid #2f3136}
+header b{white-space:nowrap}
+#menu{display:none;background:none;border:0;font-size:20px}
+#heatwrap{flex:1;height:8px;background:var(--bg3);border-radius:8px;overflow:hidden}
+#heat{height:100%;width:0;background:linear-gradient(90deg,var(--acc2),var(--acc));transition:width .6s}
+body.bonfire header{box-shadow:0 4px 24px #ff6b3566}
+body.bonfire #heat{animation:fl .5s infinite alternate}
+@keyframes fl{to{filter:brightness(1.4)}}
+#msgs{flex:1;overflow:auto;padding:10px 14px}
+.m{position:relative;padding:6px 0 8px}
+.m b{color:var(--acc2)}
+.m time{color:var(--mut);font-size:11px;margin-left:6px}
+.m.w{background:#7b4dff22;border-left:3px solid #7b4dff;padding-left:8px;border-radius:4px;margin:4px 0}
+.txt{white-space:pre-wrap;word-break:break-word}
+.sp{background:none;border:1px solid #3a3c42;border-radius:12px;padding:0 8px;margin-top:4px;color:var(--mut);font-size:13px}
+.sp.has{border-color:var(--acc);color:var(--acc2)}
+.burn{display:block;height:2px;margin-top:6px;background:var(--acc);border-radius:2px;transform-origin:left;opacity:.8}
+.poll{margin-top:6px;display:grid;gap:4px;max-width:360px}
+.opt{position:relative;text-align:left;background:var(--bg3);border:0;border-radius:6px;padding:6px 10px;overflow:hidden}
+.opt i{position:absolute;inset:0 auto 0 0;background:#ff6b3544;z-index:0}
+.opt span{position:relative;z-index:1;display:flex;justify-content:space-between}
+form{display:flex;gap:6px;padding:8px 10px;border-top:1px solid #2f3136}
+form input{flex:1;min-width:0}
+.sys{color:var(--mut);font-style:italic;font-size:13px;padding:4px 0}
+@media(max-width:720px){
+ #app{grid-template-columns:1fr}
+ #menu{display:block}
+ aside{position:fixed;z-index:5;top:0;bottom:0;width:230px;transform:translateX(-100%);transition:transform .2s}
+ aside.open{transform:none}
+ #users{display:none}
+}
+</style>
+</head>
+<body>
+<div id="login">
+  <h1>🔥 Ember</h1>
+  <input id="name" placeholder="Your name" maxlength="20">
+  <input id="url" placeholder="ws://192.168.1.10:8080/ws" autocapitalize="off">
+  <button class="btn" id="go">Join</button>
+  <div id="err"></div>
+  <small style="color:var(--mut)">Tip: Android emulator reaches your PC at ws://10.0.2.2:8080/ws</small>
+</div>
+
+<div id="app" hidden>
+  <aside id="side"><h4>Channels</h4><div id="chs"></div><h4>Commands</h4>
+    <div class="u">/poll Q | A | B</div><div class="u">/w name text</div><div class="u">/mood 😎</div><div class="u">/channel name [secs]</div></aside>
+  <main>
+    <header><button id="menu">☰</button><b id="title"></b><div id="heatwrap" title="Channel heat"><div id="heat"></div></div></header>
+    <div id="msgs"></div>
+    <form id="f">
+      <select id="ttl" title="Vanish after"><option value="">Keep</option><option value="10">10s</option><option value="60">1m</option><option value="3600">1h</option></select>
+      <input id="inp" placeholder="Message" autocomplete="off">
+      <button class="btn">Send</button>
+    </form>
+  </main>
+  <aside id="users"><h4>Online</h4><div id="ulist"></div></aside>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const h=(t,a={},...c)=>{const e=document.createElement(t);for(const k in a){if(k==='class')e.className=a[k];else if(k.startsWith('on'))e.addEventListener(k.slice(2),a[k]);else e.setAttribute(k,a[k])}for(const x of c.flat())if(x!=null)e.append(x.nodeType?x:document.createTextNode(x));return e};
+const S={ws:null,me:'',ch:[],msgs:{},users:[],cur:null,heat:{},skew:0};
+const tauri=window.__TAURI__&&window.__TAURI__.core;
+const loadCfg=async()=>{try{return tauri?await tauri.invoke('load_cfg'):localStorage.getItem('srv')||''}catch(e){return ''}};
+const saveCfg=async u=>{try{tauri?await tauri.invoke('save_cfg',{url:u}):localStorage.setItem('srv',u)}catch(e){}};
+const send=o=>S.ws&&S.ws.readyState===1&&S.ws.send(JSON.stringify(o));
+const srvNow=()=>Date.now()/1000+S.skew;
+const fmt=t=>new Date(t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+loadCfg().then(u=>{if(u)$('#url').value=u});
+$('#go').onclick=connect;
+
+function connect(){
+  const name=$('#name').value.trim(),url=$('#url').value.trim();
+  if(!name||!url)return;
+  $('#err').textContent='';saveCfg(url);
+  let ws;try{ws=new WebSocket(url)}catch(e){$('#err').textContent='Bad URL';return}
+  S.ws=ws;
+  ws.onopen=()=>send({t:'join',name});
+  ws.onmessage=e=>on(JSON.parse(e.data));
+  ws.onerror=()=>{$('#err').textContent='Could not connect'};
+  ws.onclose=()=>{$('#login').hidden=false;$('#app').hidden=true};
+}
+
+function on(ev){
+  switch(ev.t){
+    case 'welcome':
+      Object.assign(S,{me:ev.you,ch:ev.channels,msgs:ev.history,users:ev.users,skew:ev.now-Date.now()/1000});
+      S.ch.forEach(c=>S.heat[c.id]=c.heat);
+      S.cur=S.ch[0].id;$('#login').hidden=true;$('#app').hidden=false;renderAll();break;
+    case 'message':(S.msgs[ev.msg.channel]=S.msgs[ev.msg.channel]||[]).push(ev.msg);if(ev.msg.channel===S.cur)renderMsgs();break;
+    case 'gone':S.msgs[ev.channel]=(S.msgs[ev.channel]||[]).filter(m=>m.id!==ev.msg);if(ev.channel===S.cur)renderMsgs();break;
+    case 'spark':{const m=(S.msgs[ev.channel]||[]).find(m=>m.id===ev.msg);if(m){m.sparks=ev.count;S.heat[ev.channel]=(S.heat[ev.channel]||0)+2;if(ev.channel===S.cur){renderMsgs();renderHeat()}}break}
+    case 'poll':{const m=(S.msgs[ev.channel]||[]).find(m=>m.id===ev.msg);if(m){m.poll=ev.poll;if(ev.channel===S.cur)renderMsgs()}break}
+    case 'presence':S.users=ev.users;renderUsers();break;
+    case 'channel':S.ch.push(ev.channel);S.msgs[ev.channel.id]=[];renderChannels();break;
+    case 'heat':Object.assign(S.heat,ev.levels);renderHeat();renderChannels();break;
+    case 'whisper':{const o=ev.from===S.me?ev.to:ev.from;(S.msgs[S.cur]=S.msgs[S.cur]||[]).push({id:'w'+Date.now(),author:ev.from,text:ev.text,ts:ev.ts,whisper:true,tag:ev.from===S.me?'whisper to '+o:'whispers',sparks:0});renderMsgs();break}
+    case 'error':(S.msgs[S.cur]=S.msgs[S.cur]||[]).push({id:'e'+Date.now(),sys:true,text:ev.text});renderMsgs();break;
+  }
+}
+
+function renderAll(){renderChannels();renderMsgs();renderUsers();renderHeat()}
+function renderChannels(){
+  const box=$('#chs');box.replaceChildren(...S.ch.map(c=>h('div',{class:'ch'+(c.id===S.cur?' on':''),onclick:()=>{S.cur=c.id;$('#side').classList.remove('open');renderAll()}},
+    h('span',{},'# '+c.name),h('small',{},c.ttl?'🔥'+c.ttl+'s':'',(S.heat[c.id]||0)>=10?' ♨':''))));
+}
+function renderUsers(){$('#ulist').replaceChildren(...S.users.map(u=>h('div',{class:'u'},(u.mood||'🙂')+' '+u.name)))}
+function renderHeat(){
+  const c=S.ch.find(c=>c.id===S.cur);if(!c)return;
+  const v=S.heat[c.id]||0;$('#heat').style.width=Math.min(100,v*5)+'%';
+  document.body.classList.toggle('bonfire',v>=10);
+  $('#title').textContent='# '+c.name+(c.ttl?'  (burns in '+c.ttl+'s)':'');
+}
+function renderMsgs(){
+  const box=$('#msgs'),near=box.scrollHeight-box.scrollTop-box.clientHeight<80;
+  box.replaceChildren(...(S.msgs[S.cur]||[]).map(m=>{
+    if(m.sys)return h('div',{class:'sys'},m.text);
+    const el=h('div',{class:'m'+(m.whisper?' w':'')},h('b',{},m.author),h('time',{},fmt(m.ts)+(m.tag?' · '+m.tag:'')),h('div',{class:'txt'},m.text));
+    if(m.poll){const tot=m.poll.options.reduce((a,o)=>a+o.votes,0)||1;
+      el.append(h('div',{class:'poll'},m.poll.options.map((o,i)=>h('button',{class:'opt',onclick:()=>send({t:'vote',channel:S.cur,msg:m.id,option:i})},
+        h('i',{style:'width:'+(o.votes/tot*100)+'%'}),h('span',{},h('span',{},o.label),h('span',{},o.votes))))));}
+    if(!m.whisper)el.append(h('button',{class:'sp'+(m.sparks?' has':''),onclick:()=>send({t:'spark',channel:S.cur,msg:m.id})},'✨ '+(m.sparks||'')));
+    if(m.expires)el.append(h('i',{class:'burn','data-ts':m.ts,'data-exp':m.expires}));
+    return el;}));
+  if(near)box.scrollTop=box.scrollHeight;
+}
+setInterval(()=>{document.querySelectorAll('.burn').forEach(b=>{const ts=+b.dataset.ts,ex=+b.dataset.exp;b.style.transform='scaleX('+Math.max(0,Math.min(1,(ex-srvNow())/(ex-ts)))+')'})},250);
+
+$('#menu').onclick=()=>$('#side').classList.toggle('open');
+$('#f').onsubmit=e=>{
+  e.preventDefault();const v=$('#inp').value.trim();if(!v)return;$('#inp').value='';
+  if(v.startsWith('/poll ')){const [q,...o]=v.slice(6).split('|').map(s=>s.trim());return send({t:'poll',channel:S.cur,question:q,options:o})}
+  if(v.startsWith('/w ')){const m=v.match(/^\/w (\S+) (.+)$/);return m&&send({t:'whisper',to:m[1],text:m[2]})}
+  if(v.startsWith('/mood '))return send({t:'mood',mood:v.slice(6)});
+  if(v.startsWith('/channel ')){const [n,t]=v.slice(9).split(' ');return send({t:'new_channel',name:n,ttl:t?+t:null})}
+  send({t:'send',channel:S.cur,text:v,ttl:+$('#ttl').value||null});
+};
+</script>
+</body>
+</html>
