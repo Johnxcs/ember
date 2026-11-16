@@ -48,9 +48,10 @@ The APK is debug-signed so it installs directly. For Play Store, add a release k
 
 ## Desktop dev
 ```
-cd app && npm i -g @tauri-apps/cli@^2
-python3 make_icon.py && tauri icon icon.png
-tauri dev
+cargo install tauri-cli --version "^2" --locked
+cd app
+python3 make_icon.py && cargo tauri icon icon.png
+cargo tauri dev
 ```
 (The UI also works in a plain browser: open `app/ui/index.html`.)
 

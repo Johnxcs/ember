@@ -55,24 +55,22 @@ jobs:
         with:
           workspaces: app/src-tauri
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@^2 2>&1 | tee -a "$BUILD_LOG"
+      # The native (Rust) Tauri CLI. The npm version breaks Gradle's rustBuild step
+      # ("Cannot find module .../src-tauri/tauri"). First run compiles it; later runs are cached.
+      - name: Install Tauri CLI (cargo-tauri)
+        run: cargo install tauri-cli --version "^2" --locked 2>&1 | tee -a "$BUILD_LOG"
 
       - name: Generate app icons
         working-directory: app
         run: |
           {
             python3 make_icon.py
-            tauri icon icon.png
+            cargo tauri icon icon.png
           } 2>&1 | tee -a "$BUILD_LOG"
 
       - name: Init Android project
         working-directory: app
-        run: tauri android init 2>&1 | tee -a "$BUILD_LOG"
+        run: cargo tauri android init 2>&1 | tee -a "$BUILD_LOG"
 
       - name: Allow ws:// (cleartext) connections
         run: |
@@ -81,7 +79,7 @@ jobs:
 
       - name: Build APK (debug-signed, installable)
         working-directory: app
-        run: tauri android build --apk --debug --target aarch64 2>&1 | tee -a "$BUILD_LOG"
+        run: cargo tauri android build --apk --debug --target aarch64 2>&1 | tee -a "$BUILD_LOG"
 
       - name: Collect APK
         run: |
