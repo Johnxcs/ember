@@ -81,7 +81,7 @@ jobs:
 
       - name: Build APK (debug-signed, installable)
         working-directory: app
-        run: tauri android build --apk --debug --target aarch64 -v 2>&1 | tee -a "$BUILD_LOG"
+        run: tauri android build --apk --debug --target aarch64 2>&1 | tee -a "$BUILD_LOG"
 
       - name: Collect APK
         run: |
@@ -101,13 +101,20 @@ jobs:
           files: dist/ember.apk
 
       # ---- only when something above failed ----
-      - name: Show end of build.log in the run summary
+      - name: Show errors from build.log in the run summary
         if: failure()
         run: |
-          echo '### Build failed - last 150 lines of build.log' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 150 "$BUILD_LOG" >> "$GITHUB_STEP_SUMMARY" || echo "no build.log" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '### Build failed'
+            echo '#### Error lines found in build.log'
+            echo '```'
+            grep -n -i -E "what went wrong|execution failed|build failed|error(:|\[)|panicked|could not|not found|failed to|unable to|exception" "$BUILD_LOG" | cut -c1-300 | tail -n 40 || true
+            echo '```'
+            echo '#### Last 60 lines (long lines shortened)'
+            echo '```'
+            tail -n 60 "$BUILD_LOG" | cut -c1-250 || echo "no build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build.log
         if: failure()
