@@ -14,7 +14,7 @@ env:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash   # bash runs with pipefail, so a failing command still fails the step after "| tee"
@@ -25,21 +25,26 @@ jobs:
         run: |
           {
             echo "== Ember build $(date -u) =="
-            echo "-- repo files --"; ls -la; echo "-- app/ --"; ls -la app app/src-tauri 2>&1 || true
+            ls -la app/src-tauri
+            echo "-- env --"; env | grep -E '^(JAVA_HOME|ANDROID|RUNNER_OS|ImageVersion)' || true
           } 2>&1 | tee "$BUILD_LOG"
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - uses: android-actions/setup-android@v3
-
-      - name: Install NDK + platform
+      # Preinstalled on GitHub's Ubuntu runners; no third-party setup actions needed.
+      - name: Set up Java 17 + Android SDK + NDK
         run: |
           {
-            sdkmanager "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
-            echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+            set -x
+            export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+            echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+            echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+            echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+            SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            [ -x "$SDKM" ] || SDKM="$(command -v sdkmanager)"
+            yes | "$SDKM" --licenses > /dev/null || true
+            "$SDKM" "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
+            ls "$ANDROID_HOME/ndk"
           } 2>&1 | tee -a "$BUILD_LOG"
 
       - uses: dtolnay/rust-toolchain@stable
