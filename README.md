@@ -42,6 +42,8 @@ Host it anywhere that runs a binary (VPS, Fly.io, Railway). Use `wss://` behind 
 2. Open **Actions → Build Android APK** (runs on every push, or click *Run workflow*).
 3. Download the `ember-apk` artifact → install `ember.apk`. Tag `v1.0.0` to also attach it to a Release.
 
+If a build fails, open the failed run: the last 150 log lines are shown in the run **Summary**, and the full `build-log` file is under **Artifacts** (send it to me to debug).
+
 The APK is debug-signed so it installs directly. For Play Store, add a release keystore via GitHub Secrets.
 
 ## Desktop dev
@@ -54,4 +56,3 @@ tauri dev
 
 ## Ideas next
 Supabase Auth for real accounts, image uploads, voice rooms (WebRTC), push notifications.
-# ember

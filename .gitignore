@@ -3,3 +3,4 @@ app/icon.png
 app/src-tauri/icons/
 app/src-tauri/gen/
 .env
+build.log
