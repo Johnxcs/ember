@@ -21,6 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Start build.log
+        run: |
+          {
+            echo "== Ember build $(date -u) =="
+            echo "-- repo files --"; ls -la; echo "-- app/ --"; ls -la app app/src-tauri 2>&1 || true
+          } 2>&1 | tee "$BUILD_LOG"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
