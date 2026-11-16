@@ -1,0 +1,136 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BUILD_LOG: ${{ github.workspace }}/build.log
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash   # bash runs with pipefail, so a failing command still fails the step after "| tee"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start build.log
+        run: |
+          {
+            echo "== Ember build $(date -u) =="
+            ls -la app/src-tauri
+            echo "-- env --"; env | grep -E '^(JAVA_HOME|ANDROID|RUNNER_OS|ImageVersion)' || true
+          } 2>&1 | tee "$BUILD_LOG"
+
+      # Preinstalled on GitHub's Ubuntu runners; no third-party setup actions needed.
+      - name: Set up Java 17 + Android SDK + NDK
+        run: |
+          {
+            set -x
+            export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+            echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+            echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+            echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+            SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            [ -x "$SDKM" ] || SDKM="$(command -v sdkmanager)"
+            yes | "$SDKM" --licenses > /dev/null || true
+            "$SDKM" "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
+            ls "$ANDROID_HOME/ndk"
+          } 2>&1 | tee -a "$BUILD_LOG"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      # The native (Rust) Tauri CLI. The npm version breaks Gradle's rustBuild step
+      # ("Cannot find module .../src-tauri/tauri"). First run compiles it; later runs are cached.
+      - name: Install Tauri CLI (cargo-tauri)
+        run: cargo install tauri-cli --version "^2" --locked 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: Generate app icons
+        working-directory: app
+        run: |
+          {
+            python3 make_icon.py
+            cargo tauri icon icon.png
+          } 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: Write app config from repository Variables
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        run: |
+          if [ -n "$SUPABASE_URL" ]; then
+            python3 -c 'import json,os;print("window.EMBER = "+json.dumps({k:os.environ.get(k,"") for k in ("SUPABASE_URL","SUPABASE_ANON_KEY","SERVER_URL")})+";")' > app/ui/config.js
+            echo "config.js written from repository Variables (URL=$SUPABASE_URL, SERVER_URL=$SERVER_URL)" | tee -a "$BUILD_LOG"
+          else
+            echo "No SUPABASE_URL variable set; keeping committed app/ui/config.js" | tee -a "$BUILD_LOG"
+          fi
+
+      - name: Init Android project
+        working-directory: app
+        run: cargo tauri android init 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: Allow ws:// (cleartext) connections
+        run: |
+          M=app/src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          grep -q usesCleartextTraffic "$M" || sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$M"
+
+      - name: Build APK (debug-signed, installable)
+        working-directory: app
+        run: cargo tauri android build --apk --debug --target aarch64 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          find app/src-tauri/gen/android -name "*.apk" -exec cp {} dist/ember.apk \;
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ember-apk
+          path: dist/ember.apk
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ember.apk
+
+      # ---- only when something above failed ----
+      - name: Show errors from build.log in the run summary
+        if: failure()
+        run: |
+          {
+            echo '### Build failed'
+            echo '#### Error lines found in build.log'
+            echo '```'
+            grep -n -i -E "what went wrong|execution failed|build failed|error(:|\[)|panicked|could not|not found|failed to|unable to|exception" "$BUILD_LOG" | cut -c1-300 | tail -n 40 || true
+            echo '```'
+            echo '#### Last 60 lines (long lines shortened)'
+            echo '```'
+            tail -n 60 "$BUILD_LOG" | cut -c1-250 || echo "no build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build.log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
