@@ -66,7 +66,7 @@ jobs:
         working-directory: app
         run: |
           {
-            convert -size 1024x1024 xc:'#ff6b35' icon.png
+            python3 make_icon.py
             tauri icon icon.png
           } 2>&1 | tee -a "$BUILD_LOG"
 
