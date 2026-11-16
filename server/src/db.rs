@@ -109,3 +109,29 @@ pub async fn purge(pool: &PgPool) -> Result<(), sqlx::Error> {
         .await?;
     Ok(())
 }
+
+/// Reserve a unique username for an account. Returns the account's username,
+/// or None if somebody else already owns the one it asked for.
+pub async fn claim_username(pool: &PgPool, user_id: &str, wanted: &str) -> Result<Option<String>, sqlx::Error> {
+    if let Some(r) = sqlx::query("select username from profiles where user_id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+    {
+        return Ok(Some(r.get("username")));
+    }
+    let r = sqlx::query("insert into profiles (user_id, username) values ($1, $2) on conflict do nothing returning username")
+        .bind(user_id)
+        .bind(wanted)
+        .fetch_optional(pool)
+        .await?;
+    Ok(r.map(|r| r.get("username")))
+}
+
+pub async fn username_free(pool: &PgPool, name: &str) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("select 1 from profiles where lower(username) = lower($1)")
+        .bind(name)
+        .fetch_optional(pool)
+        .await?;
+    Ok(r.is_none())
+}

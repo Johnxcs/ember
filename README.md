@@ -24,6 +24,15 @@ Without `DATABASE_URL` the server falls back to in-memory storage.
 
 Keep the database password on the server only (host env vars / secrets). Never put it in the Android app.
 
+## Login system (Supabase Auth)
+Users sign up with email + password and a unique username. The app talks to Supabase Auth; the Rust server verifies every login before letting anyone chat (guests are blocked once auth is on).
+1. **Supabase → Authentication**: make sure the **Email** provider is on. For easy testing turn **Confirm email** off (otherwise users must click a link in an email before logging in).
+2. **Supabase → Project Settings → API**: copy the **Project URL** and the **anon / publishable** key. Never use the `service_role` / secret key.
+3. **Render → your service → Environment**: add `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Redeploy.
+4. **GitHub repo → Settings → Secrets and variables → Actions → Variables tab**: add `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SERVER_URL` (like `wss://ember-server.onrender.com/ws`). The APK workflow writes them into `app/ui/config.js`, so users never type a server address.
+5. Re-run **Build Android APK** and install the new APK.
+Without these settings the app falls back to the old "type a name" guest mode.
+
 ## Deploy free on Render
 1. Push this repo to GitHub. Sign up at render.com with GitHub.
 2. **New → Blueprint**, pick your repo. Render reads `render.yaml`.

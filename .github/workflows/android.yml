@@ -68,6 +68,19 @@ jobs:
             cargo tauri icon icon.png
           } 2>&1 | tee -a "$BUILD_LOG"
 
+      - name: Write app config from repository Variables
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        run: |
+          if [ -n "$SUPABASE_URL" ]; then
+            python3 -c 'import json,os;print("window.EMBER = "+json.dumps({k:os.environ.get(k,"") for k in ("SUPABASE_URL","SUPABASE_ANON_KEY","SERVER_URL")})+";")' > app/ui/config.js
+            echo "config.js written from repository Variables (URL=$SUPABASE_URL, SERVER_URL=$SERVER_URL)" | tee -a "$BUILD_LOG"
+          else
+            echo "No SUPABASE_URL variable set; keeping committed app/ui/config.js" | tee -a "$BUILD_LOG"
+          fi
+
       - name: Init Android project
         working-directory: app
         run: cargo tauri android init 2>&1 | tee -a "$BUILD_LOG"

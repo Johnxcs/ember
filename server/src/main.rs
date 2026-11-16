@@ -21,6 +21,7 @@ use std::{
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 
+mod auth;
 mod db;
 
 fn now() -> u64 {
@@ -79,6 +80,7 @@ struct App {
     inner: Arc<Mutex<Inner>>,
     bus: broadcast::Sender<Out>,
     db: Option<sqlx::PgPool>, // Supabase / Postgres (optional)
+    auth: Option<Arc<auth::AuthCfg>>, // Supabase Auth (optional; without it anyone can join as a guest)
 }
 impl App {
     /// Fire-and-forget DB write so chat never waits on the database.
@@ -108,7 +110,7 @@ fn presence(i: &Inner) -> Value {
 #[derive(Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 enum Client {
-    Join { name: String },
+    Join { name: String, token: Option<String> },
     Send { channel: String, text: String, ttl: Option<u64> },
     Spark { channel: String, msg: String },
     Poll { channel: String, question: String, options: Vec<String> },
@@ -236,6 +238,18 @@ async fn handle(app: &App, me: &str, cmd: Client) {
     }
 }
 
+/// Sign-up screen asks this before creating an account.
+async fn username_check(
+    State(app): State<App>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let free = match &app.db {
+        Some(p) => db::username_free(p, &name).await.unwrap_or(true),
+        None => true,
+    };
+    axum::Json(json!({ "available": free }))
+}
+
 async fn ws_handler(ws: WebSocketUpgrade, State(app): State<App>) -> impl IntoResponse {
     ws.on_upgrade(move |s| client(s, app))
 }
@@ -251,8 +265,48 @@ async fn client(socket: WebSocket, app: App) {
                 let Message::Text(txt) = m else { continue };
                 let Ok(cmd) = serde_json::from_str::<Client>(&txt) else { continue };
                 match (&name, cmd) {
-                    (None, Client::Join { name: n }) => {
-                        let base: String = n.split_whitespace().collect::<Vec<_>>().join("_").chars().take(20).collect();
+                    (None, Client::Join { name: n, token }) => {
+                        let base: String = match &app.auth {
+                            // Guest mode: no Supabase Auth configured on the server.
+                            None => n.split_whitespace().collect::<Vec<_>>().join("_").chars().take(20).collect(),
+                            Some(a) => {
+                                let user = match token {
+                                    Some(t) => auth::verify(a, &t).await,
+                                    None => Err("Please log in.".to_string()),
+                                };
+                                let user = match user {
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        let _ = tx.send(Message::Text(json!({"t": "auth_error", "text": e}).to_string())).await;
+                                        break;
+                                    }
+                                };
+                                let want = user
+                                    .username
+                                    .clone()
+                                    .unwrap_or_else(|| user.email.split('@').next().unwrap_or("").to_string());
+                                let want: String = want.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(20).collect();
+                                let want = if want.len() < 3 {
+                                    format!("user{}", user.id.chars().take(6).collect::<String>())
+                                } else {
+                                    want
+                                };
+                                match &app.db {
+                                    Some(p) => match db::claim_username(p, &user.id, &want).await {
+                                        Ok(Some(u)) => u,
+                                        Ok(None) => {
+                                            let _ = tx.send(Message::Text(json!({"t": "auth_error", "text": "That username is already taken."}).to_string())).await;
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("claim_username failed: {e}");
+                                            want
+                                        }
+                                    },
+                                    None => want,
+                                }
+                            }
+                        };
                         if base.is_empty() { continue }
                         let mut g = app.inner.lock().await;
                         let mut nm = base.clone();
@@ -335,10 +389,25 @@ async fn main() {
             }
         }
     }
+    let auth = match (std::env::var("SUPABASE_URL"), std::env::var("SUPABASE_ANON_KEY")) {
+        (Ok(u), Ok(k)) if !u.is_empty() && !k.is_empty() => {
+            println!("Supabase Auth enabled: guests are blocked, login required");
+            Some(Arc::new(auth::AuthCfg {
+                url: u.trim_end_matches('/').to_string(),
+                key: k,
+                http: reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap(),
+            }))
+        }
+        _ => {
+            println!("SUPABASE_URL / SUPABASE_ANON_KEY not set: guest mode (no login)");
+            None
+        }
+    };
     let app = App {
         inner: Arc::new(Mutex::new(Inner { channels, users: HashMap::new() })),
         bus,
         db,
+        auth,
     };
 
     // Background ticker: vanish expired messages, decay channel heat.
@@ -388,6 +457,8 @@ async fn main() {
         .route("/", get(|| async { "Ember server is running" }))
         .route("/health", get(|| async { "ok" }))
         .route("/ws", get(ws_handler))
+        .route("/username/:name", get(username_check))
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(app);
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".into());
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await.unwrap();

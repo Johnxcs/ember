@@ -14,6 +14,8 @@ button,input,select{font:inherit;color:inherit}
 #login h1{margin:0;color:var(--acc);font-size:34px}
 input,select{background:var(--bg3);border:1px solid #3a3c42;border-radius:8px;padding:10px}
 .btn{background:var(--acc);border:0;border-radius:8px;padding:10px 14px;color:#fff;font-weight:600}
+.btn.alt{background:var(--bg3);color:var(--fg)}
+#conn{position:fixed;top:0;left:0;right:0;z-index:9;background:var(--acc);color:#fff;text-align:center;padding:calc(6px + env(safe-area-inset-top)) 6px 6px;font-size:13px}
 #err{color:#ff7b7b;min-height:1.2em}
 #app{display:grid;grid-template-columns:200px 1fr 170px;height:100%;padding-bottom:env(safe-area-inset-bottom)}
 aside{background:var(--bg2);overflow:auto;padding:calc(10px + env(safe-area-inset-top)) 8px 10px}
@@ -57,18 +59,30 @@ form input{flex:1;min-width:0}
 </style>
 </head>
 <body>
+<div id="conn" hidden>Connecting to server… (it may be waking up)</div>
 <div id="login">
   <h1>🔥 Ember</h1>
-  <input id="name" placeholder="Your name" maxlength="20">
-  <input id="url" placeholder="ws://192.168.1.10:8080/ws" autocapitalize="off">
-  <button class="btn" id="go">Join</button>
+  <div id="authbox" style="display:grid;gap:10px">
+    <input id="email" type="email" placeholder="Email" autocomplete="username" autocapitalize="off">
+    <input id="user" placeholder="Username (sign up only)" maxlength="20" autocapitalize="off">
+    <input id="pass" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+    <button class="btn" id="login-btn">Log in</button>
+    <button class="btn alt" id="signup-btn">Create account</button>
+  </div>
+  <div id="guestbox" style="display:grid;gap:10px">
+    <input id="name" placeholder="Your name" maxlength="20">
+    <button class="btn" id="go">Join</button>
+  </div>
+  <div id="serverbox" style="display:grid;gap:6px">
+    <input id="url" placeholder="wss://your-server.onrender.com/ws" autocapitalize="off">
+    <small style="color:var(--mut)">Server address. Android emulator reaches your PC at ws://10.0.2.2:8080/ws</small>
+  </div>
   <div id="err"></div>
-  <small style="color:var(--mut)">Tip: Android emulator reaches your PC at ws://10.0.2.2:8080/ws</small>
 </div>
 
 <div id="app" hidden>
   <aside id="side"><h4>Channels</h4><div id="chs"></div><h4>Commands</h4>
-    <div class="u">/poll Q | A | B</div><div class="u">/w name text</div><div class="u">/mood 😎</div><div class="u">/channel name [secs]</div></aside>
+    <div class="u">/poll Q | A | B</div><div class="u">/w name text</div><div class="u">/mood 😎</div><div class="u">/channel name [secs]</div><h4>Account</h4><div class="u"><button class="sp" id="logout">Log out</button></div></aside>
   <main>
     <header><button id="menu">☰</button><b id="title"></b><div id="heatwrap" title="Channel heat"><div id="heat"></div></div></header>
     <div id="msgs"></div>
@@ -81,6 +95,7 @@ form input{flex:1;min-width:0}
   <aside id="users"><h4>Online</h4><div id="ulist"></div></aside>
 </div>
 
+<script src="config.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const h=(t,a={},...c)=>{const e=document.createElement(t);for(const k in a){if(k==='class')e.className=a[k];else if(k.startsWith('on'))e.addEventListener(k.slice(2),a[k]);else e.setAttribute(k,a[k])}for(const x of c.flat())if(x!=null)e.append(x.nodeType?x:document.createTextNode(x));return e};
@@ -92,27 +107,84 @@ const send=o=>S.ws&&S.ws.readyState===1&&S.ws.send(JSON.stringify(o));
 const srvNow=()=>Date.now()/1000+S.skew;
 const fmt=t=>new Date(t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 
-loadCfg().then(u=>{if(u)$('#url').value=u});
-$('#go').onclick=connect;
+const CFG=window.EMBER||{},AUTH=!!(CFG.SUPABASE_URL&&CFG.SUPABASE_ANON_KEY);
+const err=t=>{$('#err').textContent=t||''};
+$('#authbox').hidden=!AUTH;$('#guestbox').hidden=AUTH;$('#serverbox').hidden=!!CFG.SERVER_URL;
+if(CFG.SERVER_URL)$('#url').value=CFG.SERVER_URL;
+const serverUrl=()=>(CFG.SERVER_URL||$('#url').value).trim();
+const httpBase=()=>{const u=serverUrl();return u?u.replace(/^ws/,'http').replace(/\/ws\/?$/,''):''};
 
-function connect(){
-  const name=$('#name').value.trim(),url=$('#url').value.trim();
-  if(!name||!url)return;
-  $('#err').textContent='';saveCfg(url);
-  let ws;try{ws=new WebSocket(url)}catch(e){$('#err').textContent='Bad URL';return}
-  S.ws=ws;
-  ws.onopen=()=>send({t:'join',name});
-  ws.onmessage=e=>on(JSON.parse(e.data));
-  ws.onerror=()=>{$('#err').textContent='Could not connect'};
-  ws.onclose=()=>{$('#login').hidden=false;$('#app').hidden=true};
+async function sbPost(path,body){
+  const r=await fetch(CFG.SUPABASE_URL.replace(/\/$/,'')+path,{method:'POST',headers:{apikey:CFG.SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error_description||j.msg||j.message||('Error '+r.status));
+  return j;
 }
+const saveSession=j=>{S.session={access:j.access_token,refresh:j.refresh_token};try{localStorage.setItem('ember_rt',j.refresh_token)}catch(e){}};
+const clearSession=()=>{S.session=null;try{localStorage.removeItem('ember_rt')}catch(e){}};
+
+async function login(){
+  const email=$('#email').value.trim(),password=$('#pass').value;
+  if(!email||!password)return err('Enter your email and password');
+  err('');
+  try{saveSession(await sbPost('/auth/v1/token?grant_type=password',{email,password}));openSocket({token:S.session.access})}
+  catch(e){err(e.message)}
+}
+async function signup(){
+  const email=$('#email').value.trim(),password=$('#pass').value,user=$('#user').value.trim();
+  if(!/^\w{3,20}$/.test(user))return err('Username: 3-20 letters, numbers or _');
+  if(!email||password.length<6)return err('Enter an email and a password of 6+ characters');
+  err('');
+  try{
+    const base=httpBase();
+    if(base){const r=await fetch(base+'/username/'+encodeURIComponent(user)).then(r=>r.json()).catch(()=>null);
+      if(r&&r.available===false)return err('That username is taken');}
+    const j=await sbPost('/auth/v1/signup',{email,password,data:{username:user}});
+    if(j.access_token){saveSession(j);openSocket({token:S.session.access})}
+    else err('Account created. Check your email to confirm it, then log in.');
+  }catch(e){err(e.message)}
+}
+// Reconnect with the saved login (also used after the connection drops).
+async function connectSession(){
+  if(!S.session)return;
+  try{saveSession(await sbPost('/auth/v1/token?grant_type=refresh_token',{refresh_token:S.session.refresh}))}
+  catch(e){
+    if(e instanceof TypeError&&++S.tries<10){$('#conn').hidden=false;return setTimeout(connectSession,3000)}
+    clearSession();$('#conn').hidden=true;$('#login').hidden=false;$('#app').hidden=true;
+    return err(e instanceof TypeError?'No connection. Check your internet.':'Please log in again.');
+  }
+  openSocket({token:S.session.access});
+}
+function openSocket(extra){
+  const url=serverUrl();
+  if(!url)return err('Enter the server address');
+  if(!CFG.SERVER_URL)saveCfg(url);
+  let ws;try{ws=new WebSocket(url)}catch(e){return err('Bad server address')}
+  S.ws=ws;
+  ws.onopen=()=>send({t:'join',name:($('#name').value||'guest').trim(),...extra});
+  ws.onmessage=e=>on(JSON.parse(e.data));
+  ws.onerror=()=>{if(!S.session)err('Could not connect to the server')};
+  ws.onclose=()=>{
+    if(S.session&&++S.tries<10){$('#conn').hidden=false;setTimeout(connectSession,3000)}
+    else{$('#conn').hidden=true;$('#login').hidden=false;$('#app').hidden=true;S.wasIn=false;if(S.session){clearSession();err('Could not reach the server')}}
+  };
+}
+S.tries=0;
+$('#login-btn').onclick=login;$('#signup-btn').onclick=signup;
+$('#go').onclick=()=>{if(!$('#name').value.trim())return err('Enter a name');err('');openSocket({})};
+$('#logout').onclick=()=>{clearSession();S.wasIn=false;S.ws&&S.ws.close()};
+loadCfg().then(u=>{
+  if(u&&!CFG.SERVER_URL)$('#url').value=u;
+  let rt='';try{rt=localStorage.getItem('ember_rt')||''}catch(e){}
+  if(AUTH&&rt){S.session={refresh:rt};connectSession()}
+});
 
 function on(ev){
   switch(ev.t){
     case 'welcome':
       Object.assign(S,{me:ev.you,ch:ev.channels,msgs:ev.history,users:ev.users,skew:ev.now-Date.now()/1000});
       S.ch.forEach(c=>S.heat[c.id]=c.heat);
-      S.cur=S.ch[0].id;$('#login').hidden=true;$('#app').hidden=false;renderAll();break;
+      S.cur=S.ch[0].id;S.wasIn=true;S.tries=0;$('#conn').hidden=true;err('');$('#login').hidden=true;$('#app').hidden=false;renderAll();break;
     case 'message':(S.msgs[ev.msg.channel]=S.msgs[ev.msg.channel]||[]).push(ev.msg);if(ev.msg.channel===S.cur)renderMsgs();break;
     case 'gone':S.msgs[ev.channel]=(S.msgs[ev.channel]||[]).filter(m=>m.id!==ev.msg);if(ev.channel===S.cur)renderMsgs();break;
     case 'spark':{const m=(S.msgs[ev.channel]||[]).find(m=>m.id===ev.msg);if(m){m.sparks=ev.count;S.heat[ev.channel]=(S.heat[ev.channel]||0)+2;if(ev.channel===S.cur){renderMsgs();renderHeat()}}break}
@@ -121,6 +193,7 @@ function on(ev){
     case 'channel':S.ch.push(ev.channel);S.msgs[ev.channel.id]=[];renderChannels();break;
     case 'heat':Object.assign(S.heat,ev.levels);renderHeat();renderChannels();break;
     case 'whisper':{const o=ev.from===S.me?ev.to:ev.from;(S.msgs[S.cur]=S.msgs[S.cur]||[]).push({id:'w'+Date.now(),author:ev.from,text:ev.text,ts:ev.ts,whisper:true,tag:ev.from===S.me?'whisper to '+o:'whispers',sparks:0});renderMsgs();break}
+    case 'auth_error':clearSession();err(ev.text);break;
     case 'error':(S.msgs[S.cur]=S.msgs[S.cur]||[]).push({id:'e'+Date.now(),sys:true,text:ev.text});renderMsgs();break;
   }
 }
